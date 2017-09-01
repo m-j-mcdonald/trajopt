@@ -1,108 +1,17 @@
-#include <boost/python.hpp>
-#include "trajopt/collision_checker.hpp"
-#include <boost/foreach.hpp>
-#include "macros.h"
-#include "openrave_userdata_utils.hpp"
-#include "numpy_utils.hpp"
-#include <limits>
-#include "utils/eigen_conversions.hpp"
-#include "trajopt/rave_utils.hpp"
-using namespace trajopt;
-using namespace Eigen;
-using namespace OpenRAVE;
-using std::vector;
+#include <vector>
 
-namespace py = boost::python;
-
-bool gInteractive = false;
-py::object PyNone = py::object();
-
-EnvironmentBasePtr GetCppEnv(py::object py_env) {
-  py::object openravepy = py::import("openravepy");
-  int id = py::extract<int>(openravepy.attr("RaveGetEnvironmentId")(py_env));
-  EnvironmentBasePtr cpp_env = RaveGetEnvironment(id);
-  return cpp_env;
-}
-KinBodyPtr GetCppKinBody(py::object py_kb, EnvironmentBasePtr env) {
-  KinBodyPtr cpp_kb;
-  if (PyObject_HasAttrString(py_kb.ptr(), "GetEnvironmentId")) {
-    int id = py::extract<int>(py_kb.attr("GetEnvironmentId")());
-    cpp_kb = env->GetBodyFromEnvironmentId(id);
-  }
-  return cpp_kb;
-}
-KinBody::LinkPtr GetCppLink(py::object py_link, EnvironmentBasePtr env) {
-  KinBody::LinkPtr cpp_link;
-  if (PyObject_HasAttrString(py_link.ptr(), "GetParent")) {
-    KinBodyPtr parent = GetCppKinBody(py_link.attr("GetParent")(), env);
-    int idx = py::extract<int>(py_link.attr("GetIndex")());
-    cpp_link = parent->GetLinks()[idx];
-  }
-  return cpp_link;
-}
-RobotBasePtr GetCppRobot(py::object py_robot, EnvironmentBasePtr env) {
-  return boost::dynamic_pointer_cast<RobotBase>(GetCppKinBody(py_robot, env));
-}
-RobotBase::ManipulatorPtr GetCppManip(py::object py_manip, EnvironmentBasePtr env) {
-  RobotBase::ManipulatorPtr cpp_manip;
-  if (PyObject_HasAttrString(py_manip.ptr(), "GetRobot")) {
-    RobotBasePtr robot = GetCppRobot(py_manip.attr("GetRobot")(), env);
-    cpp_manip = robot->GetManipulator(py::extract<string>(py_manip.attr("GetName")()));
-  }
-  return cpp_manip;
-}
-vector<KinBody::LinkPtr> GetCppLinks(py::object py_obj, EnvironmentBasePtr env) {
-  vector<KinBody::LinkPtr> links;
-  KinBodyPtr cpp_kb = GetCppKinBody(py_obj, env);
-  if (!!cpp_kb) links.insert(links.end(), cpp_kb->GetLinks().begin(), cpp_kb->GetLinks().end());
-  KinBody::LinkPtr cpp_link = GetCppLink(py_obj, env);
-  if (!!cpp_link) links.push_back(cpp_link);
-  return links;
+PyCollisionChecker PyGetCollisionChecker(py::object py_env) {
+  CollisionCheckerPtr cc = CollisionChecker::GetOrCreate(*GetCppEnv(py_env));
+  return PyCollisionChecker(cc);
 }
 
-py::list toPyList2(const std::vector< OpenRAVE::Vector >& x) {
-  py::list out;
-  for (int i=0; i < x.size(); ++i) out.append(toNdarray1<double>((double*)&x[i],3) );
-  return out;
-}
-
-class PyCollision {
+class PyCollisionProcessor {
 public:
-  Collision m_c;
-  PyCollision(const Collision& c) : m_c(c) {}
-  float GetDistance() {return m_c.distance;}
-  py::object GetNormal() {return toNdarray1<double>((double*)&m_c.normalB2A,3);}
-  py::object GetPtA() {return toNdarray1<double>((double*)&m_c.ptA,3);}
-  py::object GetPtB() {return toNdarray1<double>((double*)&m_c.ptB,3);}
-  string GetLinkAName() {return m_c.linkA->GetName();}
-  string GetLinkBName() {return m_c.linkB->GetName();}
-  string GetLinkAParentName() {return m_c.linkA->GetParent()->GetName();}
-  string GetLinkBParentName() {return m_c.linkB->GetParent()->GetName();}
-  py::object GetCastAlphas() {return toNdarray1<float>(&m_c.mi.alpha[0], m_c.mi.alpha.size());}
-  py::object GetCastSupportVertices() {return toPyList2(m_c.mi.supportPtsWorld);}
-  py::object GetMultiCastAlphas() {return toNdarray1<float>(&m_c.mi.alpha[0], m_c.mi.alpha.size());}
-  py::object GetMultiCastIndices() {return toNdarray1<int>(&m_c.mi.instance_ind[0], m_c.mi.instance_ind.size());}
-  py::object GetMultiCastSupportVertices() {return toPyList2(m_c.mi.supportPtsWorld);}
-};
 
-py::list toPyList(const vector<Collision>& collisions) {
-  py::list out;
-  BOOST_FOREACH(const Collision& c, collisions) {
-    out.append(PyCollision(c));
+  py::object ValAndGrad() {
+
   }
-  return out;
-}
 
-bool compareCollisions(const Collision& c1,const Collision& c2) { return c1.distance < c2.distance; }
-
-class PyCollisionMatrix {
-public:
-  Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic> m_col_mat;
-  PyCollisionMatrix(const Eigen::Matrix<bool, Eigen::Dynamic, Eigen::Dynamic>& col_mat) : m_col_mat(col_mat) {}
-};
-
-class PyCollisionChecker {
-public:
   py::object AllVsAll() {
     vector<Collision> collisions;
     m_cc->AllVsAll(collisions);
@@ -322,73 +231,94 @@ private:
   CollisionCheckerPtr m_cc;
 };
 
-PyCollisionChecker PyGetCollisionChecker(py::object py_env) {
-  CollisionCheckerPtr cc = CollisionChecker::GetOrCreate(*GetCppEnv(py_env));
-  return PyCollisionChecker(cc);
-}
+/*
+def _calc_grad_and_val(self, robot_body, obj_body, collisions):
+        """
+            This function is helper function of robot_obj_collision(self, x)
+            It calculates collision distance and gradient between each robot's link and object
 
-void CallPyFunc(py::object f) {
-  f();
-}
+            robot_body: OpenRAVEBody containing body information of pr2 robot
+            obj_body: OpenRAVEBody containing body information of object
+            collisions: list of collision objects returned by collision checker
+            Note: Needs to provide attr_dim indicating robot pose's total attribute dim
+        """
+        # Initialization
+        links = []
+        robot = self.params[self.ind0]
+        obj = self.params[self.ind1]
+        col_links = robot.geom.col_links
+        obj_links = obj.geom.col_links
+        obj_pos = OpenRAVEBody.obj_pose_from_transform(obj_body.env_body.GetTransform())
+        Rz, Ry, Rx = OpenRAVEBody._axis_rot_matrices(obj_pos[:3], obj_pos[3:])
+        rot_axises = [[0,0,1], np.dot(Rz, [0,1,0]),  np.dot(Rz, np.dot(Ry, [1,0,0]))]
+        link_pair_to_col = {}
+        for c in collisions:
+            # Identify the collision points
+            linkA, linkB = c.GetLinkAName(), c.GetLinkBName()
+            linkAParent, linkBParent = c.GetLinkAParentName(), c.GetLinkBParentName()
+            linkRobot, linkObj = None, None
+            sign = 0
+            if linkAParent == robot_body.name and linkBParent == obj_body.name:
+                ptRobot, ptObj = c.GetPtA(), c.GetPtB()
+                linkRobot, linkObj = linkA, linkB
+                sign = -1
+            elif linkBParent == robot_body.name and linkAParent == obj_body.name:
+                ptRobot, ptObj = c.GetPtB(), c.GetPtA()
+                linkRobot, linkObj = linkB, linkA
+                sign = 1
+            else:
+                continue
 
-void translate_runtime_error(std::runtime_error const& e)
-{
-    // Use the Python 'C' API to set up an exception object
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-}
+            if linkRobot not in col_links or linkObj not in obj_links:
+                continue
+            # Obtain distance between two collision points, and their normal collision vector
+            distance = c.GetDistance()
+            normal = c.GetNormal()
+            # Calculate robot jacobian
+            robot = robot_body.env_body
+            robot_link_ind = robot.GetLink(linkRobot).GetIndex()
+            robot_jac = robot.CalculateActiveJacobian(robot_link_ind, ptRobot)
+            grad = np.zeros((1, self.attr_dim+6))
+            grad[:, :self.attr_dim] = np.dot(sign * normal, robot_jac)
+            # robot_grad = np.dot(sign * normal, robot_jac).reshape((1,20))
+            col_vec = -sign*normal
+            # Calculate object pose jacobian
+            # obj_jac = np.array([-sign*normal])
+            grad[:, self.attr_dim:self.attr_dim+3] = np.array([-sign*normal])
+            torque = ptObj - obj_pos[:3]
+            # Calculate object rotation jacobian
+            rot_vec = np.array([[np.dot(np.cross(axis, torque), col_vec) for axis in rot_axises]])
+            # obj_jac = np.c_[obj_jac, rot_vec]
+            grad[:, self.attr_dim+3:self.attr_dim+6] = rot_vec
+            # Constructing gradient matrix
+            # robot_grad = np.c_[robot_grad, obj_jac]
+            # TODO: remove robot.GetLink(linkRobot) from links (added for debugging purposes)
+            link_pair_to_col[(linkRobot, linkObj)] = [self.dsafe - distance, grad, robot.GetLink(linkRobot), robot.GetLink(linkObj)]
+            # import ipdb; ipdb.set_trace()
+            if self._debug:
+                self.plot_collision(ptRobot, ptObj, distance)
 
-BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(BodyVsAllDefaults, PyCollisionChecker::BodyVsAll, 1, 2);
-BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(BodyVsBodyDefaults, PyCollisionChecker::BodyVsBody, 2, 3);
-BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(RobotCastVsAllDefaults, PyCollisionChecker::RobotCastVsAll, 3, 5);
-BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(KinBodyCastVsAllDefaults, PyCollisionChecker::KinBodyCastVsAll, 3, 6);
-BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(RobotMultiCastVsAllDefaults, PyCollisionChecker::RobotMultiCastVsAll, 2, 4);
-BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(KinBodyMultiCastVsAllDefaults, PyCollisionChecker::KinBodyMultiCastVsAll, 2, 5);
+        vals, greds = [], []
+        for robot_link, obj_link in self.col_link_pairs:
+            col_infos = link_pair_to_col.get((robot_link, obj_link), [self.dsafe - const.MAX_CONTACT_DISTANCE, np.zeros((1, self.attr_dim+6)), None, None])
+            vals.append(col_infos[0])
+            greds.append(col_infos[1])
 
-BOOST_PYTHON_MODULE(ctrajoptpy_col) {
 
-  np_mod = py::import("numpy");
-
-  py::object openravepy = py::import("openravepy");
-
-  string pyversion = py::extract<string>(openravepy.attr("__version__"));
-  if (OPENRAVE_VERSION_STRING != pyversion) {
-    PRINT_AND_THROW("the openrave on your pythonpath is different from the openrave version that trajopt links to!");
-  }
-
-  py::register_exception_translator<std::runtime_error>(&translate_runtime_error);
-
-  py::class_<PyCollisionMatrix>("PyCollisionMatrix", py::no_init);
-
-  py::class_<PyCollisionChecker>("CollisionChecker", py::no_init)
-      .def("AllVsAll", &PyCollisionChecker::AllVsAll)
-      .def("BodyVsAll", &PyCollisionChecker::BodyVsAll, BodyVsAllDefaults())
-      .def("BodyVsBody", &PyCollisionChecker::BodyVsBody, BodyVsBodyDefaults())
-      .def("BodiesVsBodies", &PyCollisionChecker::BodiesVsBodies)
-      .def("RobotCastVsAll", &PyCollisionChecker::RobotCastVsAll, RobotCastVsAllDefaults())
-      .def("KinBodyCastVsAll", &PyCollisionChecker::KinBodyCastVsAll, KinBodyCastVsAllDefaults())
-      .def("RobotMultiCastVsAll", &PyCollisionChecker::RobotMultiCastVsAll, RobotMultiCastVsAllDefaults())
-      .def("KinBodyMultiCastVsAll", &PyCollisionChecker::KinBodyMultiCastVsAll, KinBodyMultiCastVsAllDefaults())
-      .def("ExcludeCollisionPair", &PyCollisionChecker::ExcludeCollisionPair)
-      .def("IncludeCollisionPair", &PyCollisionChecker::IncludeCollisionPair)
-      .def("SaveCollisionMatrix", &PyCollisionChecker::SaveCollisionMatrix)
-      .def("RestoreCollisionMatrix", &PyCollisionChecker::RestoreCollisionMatrix)
-      .def("SetContactDistance", &PyCollisionChecker::SetContactDistance)
-      .def("GetContactDistance", &PyCollisionChecker::GetContactDistance)
-      ;
-  py::def("GetCollisionChecker", &PyGetCollisionChecker);
-  py::class_<PyCollision>("Collision", py::no_init)
-     .def("GetDistance", &PyCollision::GetDistance)
-     .def("GetNormal", &PyCollision::GetNormal)
-     .def("GetPtA", &PyCollision::GetPtA)
-     .def("GetPtB", &PyCollision::GetPtB)
-     .def("GetLinkAName", &PyCollision::GetLinkAName)
-     .def("GetLinkBName", &PyCollision::GetLinkBName)
-     .def("GetLinkAParentName", &PyCollision::GetLinkAParentName)
-     .def("GetLinkBParentName", &PyCollision::GetLinkBParentName)
-     .def("GetCastAlphas", &PyCollision::GetCastAlphas)
-     .def("GetCastSupportVertices", &PyCollision::GetCastSupportVertices)
-     .def("GetMultiCastAlphas", &PyCollision::GetMultiCastAlphas)
-     .def("GetMultiCastIndices", &PyCollision::GetMultiCastIndices)
-     .def("GetMultiCastSupportVertices", &PyCollision::GetMultiCastSupportVertices)
-    ;
-}
+        # # arrange gradients in proper link order
+        # max_dist = self.dsafe - const.MAX_CONTACT_DISTANCE
+        # vals, robot_grads = max_dist*np.ones((len(self.col_links),1)), np.zeros((len(self.col_links), self.attr_dim+6))
+        #
+        #
+        # links = sorted(links, key = lambda x: x[0])
+        #
+        # links_pair = [(link[3].GetName(), link[4].GetName()) for link in links]
+        #
+        # vals[:len(links),0] = np.array([link[1] for link in links])
+        # robot_grads[:len(links), range(self.attr_dim+6)] = np.array([link[2] for link in links]).reshape((len(links), self.attr_dim+6))
+        # TODO: remove line below which was added for debugging purposes
+        # self.links = [(ind, val, limb) for ind, val, grad, limb in links]
+        # self.col = collisions
+        # return vals, robot_grads
+        return np.array(vals).reshape((len(vals), 1)), np.array(greds).reshape((len(greds), self.attr_dim+6))
+*/

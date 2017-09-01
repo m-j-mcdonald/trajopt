@@ -33,19 +33,11 @@ set(BUILD_SHARED_LIBS true)
 
 set(BULLET_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/ext/bullet/src)
 set(BULLET_LIBRARIES BulletCollision LinearMath)
-set(GTEST_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/ext/gtest/include)
-set(JSON_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/ext/json/include)
-set(HACD_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/ext/HACD_Lib/inc ${CMAKE_SOURCE_DIR}/ext/HACD_Lib/src)
 
 enable_testing()
 if(NOT DEFINED PYTHON_EXECUTABLE)
     include(FindPythonInterp) # Need for testing
 endif(NOT DEFINED PYTHON_EXECUTABLE)
-
-option(BUILD_CLOUDPROC "build point cloud processing stuff" OFF)
-option(BUILD_SANDBOX "build sandbox programs" OFF)
-option(BUILD_HUMANOIDS "build humanoids stuff" OFF)
-option(BUILD_SENSORSIM "build sensor simulation" OFF)
 
 include("${CMAKE_SOURCE_DIR}/cmake/boost-python.cmake")
 include("${CMAKE_SOURCE_DIR}/cmake/add_python_unit_tests.cmake")
