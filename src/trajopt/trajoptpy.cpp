@@ -344,7 +344,7 @@ BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(KinBodyCastVsAllDefaults, PyCollisionChec
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(RobotMultiCastVsAllDefaults, PyCollisionChecker::RobotMultiCastVsAll, 2, 4);
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(KinBodyMultiCastVsAllDefaults, PyCollisionChecker::KinBodyMultiCastVsAll, 2, 5);
 
-BOOST_PYTHON_MODULE(ctrajoptpy_col) {
+BOOST_PYTHON_MODULE(ctrajoptpy) {
 
   np_mod = py::import("numpy");
 
